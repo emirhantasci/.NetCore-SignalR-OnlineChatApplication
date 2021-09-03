@@ -1,0 +1,272 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+
+@section Scripts{
+    
+    <script src="~/lib/microsoft/signalr/dist/browser/signalr.min.js"></script>
+    <script type="text/javascript">
+
+        $(document).ready(() => {
+
+        
+            var connection = new signalR.HubConnectionBuilder().configureLogging(signalR.LogLevel.Debug).withAutomaticReconnect().withUrl("https://localhost:44301/myhub").build();
+            //Hub'ımızı çağırdık. Bağlantı kurduk ve bağlantıyı kimle kuracağımızı yazdık.
+            $("#sohbet1").hide();
+            $("#sohbet2").hide();
+            statusShow()
+            Start()
+
+            function Start() {
+                connection.start().then(() => {
+                    statusShow()
+                    if (connection.connectionState == "Connected") {
+                        $("#conStatus").text("Bağlandı!");
+                        $("#conStatus").addClass("text-success");
+                        $("#loading").hide();
+                        //connection.invoke("GetNames");
+                        connection.invoke("GetNamesByGroup");
+                    }
+                }).catch((err) => {
+                    console.log(err);
+                    setTimeout(()=>Start(), 2000)
+                })
+            }
+
+            function statusShow() {
+                $("#conStatus").text(connection.connectionState);
+            }
+
+            
+
+            connection.onreconnecting(err => {
+                alert(err)
+                $("#loading").show();
+                statusShow()
+                console.log("onreconnection:" + err);
+            });
+
+            connection.onreconnected(connectionId => {
+                $("#loading").hide();
+                statusShow()
+                console.log("connectionId: "+connectionId )
+            });
+
+            connection.onclose(() => {
+                $("#loading").hide();
+                statusShow();
+                $("#conStatus").addClass("text-danger");
+                alert("Yeniden bağlanma başarısız oldu!");
+                Start();
+            });
+
+            connection.on("RecieveClientCount", (clientCount) => {
+                $("#clientCount").text(clientCount);
+            });
+
+            connection.on("Notify", (countText) => {
+                console.log(countText);
+                $("#notify").html(`<div class="alert alert-warning alert-dismissible fade show" role="alert"> ${countText}
+                                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                            <span aria-hidden="true">&times;</span>
+                                        </button>
+                                   </div>`);
+            });
+
+            connection.on("Error", (errorText) => {
+                alert(errorText);
+            });
+
+            connection.on("RecieveNames", (names) => {
+                $("#namesList").empty();
+                names.forEach((item, index) => {
+                    var colon = item.split(':');
+                    var messageName = colon[0];
+                    var messageMsg = colon[1];
+                    $("#namesList").append(`<li class="list-group-item"><b>${messageName}: </b>${messageMsg}</li>`)
+                })
+            });
+
+            connection.on("RecieveName", (newMessage) => {
+                console.log(newMessage);
+
+
+                var colon = newMessage.split(':');
+                var messageName = colon[0];
+                var messageMsg = colon[1];
+                $("#namesList").append(`<li class="list-group-item"><b>${messageName}: </b>${messageMsg}</li>`)
+            })
+        //on methodu bir methoda subscribe olma işlemine yarar.
+
+            connection.on("RecieveMessageByGroup", (name, teamId) => {
+                let listName;
+                
+                if (teamId == 1) {
+                    listName = "ATeamList";
+                }
+                else {
+                    listName="BTeamList"
+                }
+
+                let colon = name.split(':');
+                let messageName = colon[0];
+                let messageMsg = colon[1];
+                $(`#${listName}`).append(`<li class="list-group-item"><b>${messageName}</b>: ${messageMsg}</li>`)
+            })
+
+            connection.on("RecieveNamesByGroup", (teams) => {
+                
+                teams.forEach((team, index) => {
+                    
+                    let listName;
+                    if (team.teamId == 1) {
+                        listName = "ATeamList";
+                    }
+                    else {
+                        listName = "BTeamList";
+                    }
+                    team.users.forEach((user, index2) => {
+                        let colon = user.name.split(':');
+                        let messageName = colon[0];
+                        let messageMsg = colon[1];
+                        $(`#${listName}`).append(`<li class="list-group-item"><b>${messageName}</b>: ${messageMsg}</li>`)
+                        
+                    })
+                })
+            })
+
+            connection.on("RecieveProduct", (product) => {
+                console.log(product);
+            })
+
+
+            $("#btnNameSave").click(() => {
+                let name = $("#txtName").val();
+                
+                let message = $("#txtMessage").val();
+
+                let newMessage = name.concat(": ", message);
+                connection.invoke("SendName", newMessage).catch((err) =>
+                    console.log(err))
+                //server tarafındaki methodları çağırmaya yarar. (invoke)
+            })
+
+            $("#btnNameTeam").click(() => {
+                let name = $("#txtName").val();
+                let message = $("#txtMessage").val();
+                let concatName = name.concat(": ", message);
+                let teamName = $("input[type=radio]:checked").val();
+                if (teamName==null) {
+                    alert("Sohbet odası seçiniz");
+                    return;
+                }
+
+                connection.invoke("SendNameByGroup", concatName, teamName).catch((err) => {
+                    console.log(err);
+                })
+            })
+
+            $("input[type=radio]").change(() => {
+                let value = $(`input[type=radio]:checked`).val();
+                
+                if (value == "TeamA") {
+                    $("#sohbet2").hide();
+                    $("#sohbet1").show();
+                    connection.invoke("AddToGroup", value);
+                    connection.invoke("RemoveToGroup", "TeamB");
+
+                }
+                else {
+                    $("#sohbet1").hide();
+                    $("#sohbet2").show();
+                    connection.invoke("AddToGroup", value);
+                    connection.invoke("RemoveToGroup", "TeamA");
+                }
+            })
+
+            $("#btnProduct").click(() => {
+                let product = { "Id": 1, "Name": "Kalem", "Price": 100, "Stock": 200 };
+                connection.invoke("SendProduct", product);
+            })
+            
+        })
+    </script>
+}
+
+
+<div class="row">
+    <div class="col-md-8 offset-2">
+        <input type="text" class="form-control" id="txtName" name="name" value="" /><br />
+        <textarea class="form-control" id="txtMessage">
+
+        </textarea><br />
+        @*<button class="btn btn-primary" id="btnNameSave">
+            Mesaj Gönder
+        </button>*@
+        <button class="btn btn-warning" id="btnNameTeam">
+            Mesaj Gönder
+        </button>
+        @*<button class="btn btn-danger" id="btnProduct">
+            Ürün Gönder
+        </button>*@
+        
+        <br /><br />
+        <div class="alert alert-info">
+            <div class="float-left">
+                Bağlantı Durumu: <b id="conStatus"></b> | 
+                Bağlı Kullanıcı Sayısı: <b id="clientCount"> </b>
+            </div>
+            <div class="float-right">
+                <div id="loading" class="spinner-border" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+            </div>
+            <div class="clearfix">
+
+            </div>
+        </div>
+        <div id="notify">
+
+        </div>
+        
+
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="form-check form-check-inline">
+            <input type="radio" class="form-check-input" name="TeamGroup" value="TeamA" />
+            <label class="form-check-label">Sohbet Odası 1</label>
+        </div>
+        <div class="form-check form-check-inline">
+            <input type="radio" class="form-check-input" name="TeamGroup" value="TeamB" />
+            <label class="form-check-label">Sohbet Odası 2</label>
+        </div>
+    </div>
+    <div class="col-md-8 offset-2 shadow" style="border: .1px solid gray;">
+        <div class="row">
+            <div class="col-md-12" id="sohbet1">
+                <ul class="list-group" id="ATeamList">
+                    <li class="list-group-item">
+                        1 Numaralı Sohbet Odasına Hoşgeldiniz...
+                    </li>
+
+                </ul>
+            </div>
+        </div>
+        <div class="row" id="sohbet2">
+            <div class="col-md-12">
+                <ul class="list-group" id="BTeamList">
+                    <li class="list-group-item">
+                        2 Numaralı Sohbet Odasına Hoşgeldiniz...
+                    </li>
+
+                </ul>
+            </div>
+        </div>
+            
+    </div>
+
+        
+</div>
